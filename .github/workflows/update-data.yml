@@ -23,7 +23,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install vnstock pandas
+          pip install vnstock3 pandas numpy
       
       - name: Run data fetcher
         run: |

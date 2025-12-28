@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VN Stock MA/VA/ADMF Scanner</title>
+  <meta name="description" content="Lọc cổ phiếu Việt Nam có MA, VA hội tụ và ADMF dao động quanh 0">
+  
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f9fafb; color: #111827; line-height: 1.5; }
+    
+    .container { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+    .grid { display: grid; gap: 24px; }
+    .grid-4 { grid-template-columns: 1fr; }
+    @media (min-width: 1024px) { .grid-4 { grid-template-columns: 300px 1fr; } }
+    
+    .header { background: linear-gradient(135deg, #1e3a8a, #7c3aed, #4f46e5); color: white; padding: 24px 0; }
+    .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+    .header p { opacity: 0.85; font-size: 14px; }
+    
+    .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 16px; margin-bottom: 16px; }
+    .card-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-secondary { background: #f3f4f6; color: #374151; }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-active { background: #2563eb; color: white; }
+    .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-pill { border-radius: 9999px; padding: 4px 10px; font-size: 12px; }
+    
+    .label { display: block; font-size: 13px; color: #4b5563; margin-bottom: 6px; }
+    .select { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background: white; }
+    .range { width: 100%; height: 6px; border-radius: 3px; background: #e5e7eb; appearance: none; cursor: pointer; }
+    .range::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #2563eb; cursor: pointer; }
+    
+    .slider-group { margin-bottom: 10px; }
+    .slider-header { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+    .slider-label { color: #4b5563; }
+    .slider-value { font-weight: 500; color: #1f2937; }
+    
+    .stats-box { background: linear-gradient(to right, #eff6ff, #f5f3ff); border-radius: 8px; padding: 12px; text-align: center; }
+    .stats-number { font-size: 28px; font-weight: 700; color: #2563eb; }
+    .stats-label { font-size: 13px; color: #4b5563; }
+    
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f9fafb; padding: 10px 8px; text-align: left; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; white-space: nowrap; }
+    th.center { text-align: center; }
+    th.right { text-align: right; }
+    th.blue { color: #2563eb; }
+    th.green { color: #16a34a; }
+    th.purple { color: #7c3aed; }
+    th.orange { color: #ea580c; }
+    td { padding: 10px 8px; border-top: 1px solid #f3f4f6; }
+    td.center { text-align: center; }
+    td.right { text-align: right; }
+    tr { cursor: pointer; transition: background 0.15s; }
+    tr:hover { background: #eff6ff; }
+    tr.selected { background: #dbeafe; }
+    .symbol { font-weight: 600; color: #111827; }
+    .mono { font-family: 'SF Mono', Monaco, monospace; font-size: 12px; }
+    .muted { color: #6b7280; }
+    
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .badge-green { background: #dcfce7; color: #166534; }
+    .badge-yellow { background: #fef9c3; color: #854d0e; }
+    .badge-orange { background: #ffedd5; color: #9a3412; }
+    .badge-red { background: #fee2e2; color: #991b1b; }
+    .badge-blue { background: #dbeafe; color: #1e40af; }
+    .badge-purple { background: #f3e8ff; color: #6b21a8; }
+    
+    .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .chart-title { font-size: 16px; font-weight: 600; }
+    .chart-close { background: none; border: none; font-size: 20px; color: #9ca3af; cursor: pointer; padding: 4px 8px; }
+    .chart-close:hover { color: #4b5563; }
+    .chart-container { position: relative; background: white; border-radius: 8px; border: 1px solid #e5e7eb; }
+    .chart-controls { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+    .chart-btn { width: 24px; height: 24px; background: #f3f4f6; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    .chart-btn:hover { background: #e5e7eb; }
+    .chart-info { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: #6b7280; }
+    .chart-tooltip { position: absolute; background: #111827; color: white; font-size: 11px; padding: 8px 10px; border-radius: 6px; pointer-events: none; z-index: 10; line-height: 1.4; }
+    
+    .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+    .spinner { width: 40px; height: 40px; border: 3px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    .empty { padding: 40px; text-align: center; color: #6b7280; }
+    .empty-icon { font-size: 40px; margin-bottom: 8px; }
+    
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+    .tab { padding: 6px 12px; font-size: 13px; font-weight: 500; color: #6b7280; cursor: pointer; border-radius: 6px; transition: all 0.2s; }
+    .tab:hover { color: #374151; background: #f3f4f6; }
+    .tab.active { color: #2563eb; background: #eff6ff; }
+    
+    .info-box { background: #fefce8; border: 1px solid #fef08a; border-radius: 8px; padding: 12px; font-size: 13px; color: #854d0e; margin-bottom: 12px; }
+    .info-box strong { color: #713f12; }
+    
+    .section-title { font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+    .section-title:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+    
+    .flex { display: flex; }
+    .gap-2 { gap: 8px; }
+    .flex-1 { flex: 1; }
+    .mt-3 { margin-top: 12px; }
+    .mb-2 { margin-bottom: 8px; }
+    
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const DATA_BASE_URL = './data';
+
+    const formatNumber = (num, decimals = 1) => {
+      if (num === null || num === undefined) return '-';
+      if (num >= 1e9) return (num / 1e9).toFixed(1) + 'B';
+      if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
+      if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
+      return num.toFixed(decimals);
+    };
+
+    const formatPrice = (p) => p == null ? '-' : p.toFixed(2);
+
+    // ===== CANDLESTICK CHART =====
+    const CandlestickChart = ({ data }) => {
+      const containerRef = React.useRef(null);
+      const canvasRef = React.useRef(null);
+      const [tooltip, setTooltip] = React.useState(null);
+      const [viewRange, setViewRange] = React.useState({ start: 0, end: 0 });
+
+      React.useEffect(() => {
+        if (!data?.length) return;
+        setViewRange({ start: Math.max(0, data.length - 90), end: data.length });
+      }, [data]);
+
+      React.useEffect(() => {
+        if (!data?.length || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const rect = containerRef.current.getBoundingClientRect();
+        
+        canvas.width = rect.width * 2;
+        canvas.height = 320 * 2;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = '320px';
+        ctx.scale(2, 2);
+
+        const width = rect.width, height = 320;
+        const pad = { top: 20, right: 55, bottom: 25, left: 10 };
+        const cw = width - pad.left - pad.right;
+        const ch = height - pad.top - pad.bottom;
+
+        const visible = data.slice(viewRange.start, viewRange.end);
+        if (!visible.length) return;
+
+        const prices = visible.flatMap(d => [d.h, d.l, d.ma5, d.ma20, d.ma60].filter(v => v != null));
+        const minP = Math.min(...prices) * 0.99;
+        const maxP = Math.max(...prices) * 1.01;
+        const range = maxP - minP;
+        const candleW = Math.max(2, Math.min(10, cw / visible.length - 2));
+        const gap = (cw - candleW * visible.length) / (visible.length + 1);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, height);
+
+        // Grid
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+          const y = pad.top + (ch / 4) * i;
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y);
+          ctx.lineTo(width - pad.right, y);
+          ctx.stroke();
+          ctx.fillStyle = '#888';
+          ctx.font = '10px sans-serif';
+          ctx.fillText((maxP - (range / 4) * i).toFixed(1), width - pad.right + 4, y + 3);
+        }
+
+        const priceToY = (p) => pad.top + (1 - (p - minP) / range) * ch;
+
+        // MA lines
+        const drawLine = (key, color) => {
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.2;
+          let started = false;
+          visible.forEach((d, i) => {
+            if (d[key] == null) return;
+            const x = pad.left + gap + i * (candleW + gap) + candleW / 2;
+            started ? ctx.lineTo(x, priceToY(d[key])) : ctx.moveTo(x, priceToY(d[key]));
+            started = true;
+          });
+          ctx.stroke();
+        };
+        drawLine('ma5', '#f59e0b');
+        drawLine('ma20', '#3b82f6');
+        drawLine('ma60', '#8b5cf6');
+
+        // Candles
+        visible.forEach((d, i) => {
+          const x = pad.left + gap + i * (candleW + gap);
+          const up = d.c >= d.o;
+          ctx.fillStyle = up ? '#22c55e' : '#ef4444';
+          ctx.strokeStyle = up ? '#16a34a' : '#dc2626';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x + candleW / 2, priceToY(d.h));
+          ctx.lineTo(x + candleW / 2, priceToY(d.l));
+          ctx.stroke();
+          const top = priceToY(Math.max(d.o, d.c));
+          const h = Math.max(1, priceToY(Math.min(d.o, d.c)) - top);
+          ctx.fillRect(x, top, candleW, h);
+        });
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        [{ l: 'MA5', c: '#f59e0b' }, { l: 'MA20', c: '#3b82f6' }, { l: 'MA60', c: '#8b5cf6' }].forEach((leg, i) => {
+          ctx.fillStyle = leg.c;
+          ctx.fillRect(pad.left + 8 + i * 55, 6, 14, 3);
+          ctx.fillStyle = '#666';
+          ctx.fillText(leg.l, pad.left + 26 + i * 55, 10);
+        });
+      }, [data, viewRange]);
+
+      const handleMouseMove = (e) => {
+        if (!data || !containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const visible = data.slice(viewRange.start, viewRange.end);
+        const cw = rect.width - 65;
+        const idx = Math.floor((x - 10) / (cw / visible.length));
+        if (idx >= 0 && idx < visible.length) setTooltip({ x, y: e.clientY - rect.top, data: visible[idx] });
+        else setTooltip(null);
+      };
+
+      const handleWheel = (e) => {
+        e.preventDefault();
+        if (!data) return;
+        const factor = e.deltaY > 0 ? 1.1 : 0.9;
+        const len = viewRange.end - viewRange.start;
+        const newLen = Math.max(20, Math.min(data.length, Math.round(len * factor)));
+        const center = (viewRange.start + viewRange.end) / 2;
+        setViewRange({ start: Math.max(0, Math.round(center - newLen / 2)), end: Math.min(data.length, Math.round(center + newLen / 2)) });
+      };
+
+      if (!data?.length) return <div style={{ height: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9fafb', borderRadius: 8, color: '#9ca3af' }}>Đang tải...</div>;
+
+      return (
+        <div ref={containerRef} className="chart-container" style={{ cursor: 'crosshair' }}
+          onMouseMove={handleMouseMove} onMouseLeave={() => setTooltip(null)} onWheel={handleWheel}>
+          <canvas ref={canvasRef} />
+          {tooltip && (
+            <div className="chart-tooltip" style={{ left: Math.min(tooltip.x + 10, containerRef.current.offsetWidth - 150), top: Math.max(10, tooltip.y - 90) }}>
+              <div style={{ fontWeight: 600, marginBottom: 2 }}>{tooltip.data.date}</div>
+              <div>O: {formatPrice(tooltip.data.o)} H: {formatPrice(tooltip.data.h)}</div>
+              <div>L: {formatPrice(tooltip.data.l)} C: {formatPrice(tooltip.data.c)}</div>
+              <div>Vol: {formatNumber(tooltip.data.v)}</div>
+              <div style={{ borderTop: '1px solid #444', marginTop: 4, paddingTop: 4 }}>
+                <span style={{ color: '#fbbf24' }}>MA5:{formatPrice(tooltip.data.ma5)}</span>
+                <span style={{ color: '#60a5fa', marginLeft: 6 }}>MA20:{formatPrice(tooltip.data.ma20)}</span>
+              </div>
+            </div>
+          )}
+          <div className="chart-controls">
+            <button className="chart-btn" onClick={() => setViewRange(r => ({ start: Math.max(0, r.end - Math.max(20, r.end - r.start - 20)), end: r.end }))}>+</button>
+            <button className="chart-btn" onClick={() => setViewRange(r => ({ start: Math.max(0, r.end - Math.min(data.length, r.end - r.start + 20)), end: r.end }))}>−</button>
+            <button className="chart-btn" style={{ width: 'auto', padding: '0 6px', fontSize: 11 }} onClick={() => setViewRange({ start: 0, end: data.length })}>All</button>
+          </div>
+          <div className="chart-info">{data[viewRange.start]?.date} → {data[viewRange.end - 1]?.date} ({viewRange.end - viewRange.start}d)</div>
+        </div>
+      );
+    };
+
+    // ===== ADMF CHART =====
+    const ADMFChart = ({ data }) => {
+      const containerRef = React.useRef(null);
+      const canvasRef = React.useRef(null);
+
+      React.useEffect(() => {
+        if (!data?.length || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const rect = containerRef.current.getBoundingClientRect();
+        
+        canvas.width = rect.width * 2;
+        canvas.height = 120 * 2;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = '120px';
+        ctx.scale(2, 2);
+
+        const width = rect.width, height = 120;
+        const pad = { top: 15, right: 55, bottom: 20, left: 10 };
+        const cw = width - pad.left - pad.right;
+        const ch = height - pad.top - pad.bottom;
+
+        const visible = data.slice(-90).filter(d => d.admf != null);
+        if (!visible.length) return;
+
+        const admfVals = visible.map(d => d.admf);
+        const maxAbs = Math.max(Math.abs(Math.min(...admfVals)), Math.abs(Math.max(...admfVals))) * 1.1;
+        const barW = Math.max(2, cw / visible.length - 1);
+        const gap = (cw - barW * visible.length) / (visible.length + 1);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, height);
+
+        // Zero line
+        const zeroY = pad.top + ch / 2;
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 2]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, zeroY);
+        ctx.lineTo(width - pad.right, zeroY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Grid
+        ctx.strokeStyle = '#f0f0f0';
+        ctx.fillStyle = '#888';
+        ctx.font = '9px sans-serif';
+        [0.25, 0.75].forEach(r => {
+          const y = pad.top + ch * r;
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y);
+          ctx.lineTo(width - pad.right, y);
+          ctx.stroke();
+        });
+
+        // Labels
+        ctx.fillText('+' + formatNumber(maxAbs, 0), width - pad.right + 4, pad.top + 8);
+        ctx.fillText('0', width - pad.right + 4, zeroY + 3);
+        ctx.fillText('-' + formatNumber(maxAbs, 0), width - pad.right + 4, pad.top + ch - 2);
+
+        // ADMF bars
+        visible.forEach((d, i) => {
+          const x = pad.left + gap + i * (barW + gap);
+          const val = d.admf;
+          const barH = (Math.abs(val) / maxAbs) * (ch / 2);
+          const isPos = val >= 0;
+          
+          ctx.fillStyle = isPos ? 'rgba(34, 197, 94, 0.7)' : 'rgba(239, 68, 68, 0.7)';
+          if (isPos) {
+            ctx.fillRect(x, zeroY - barH, barW, barH);
+          } else {
+            ctx.fillRect(x, zeroY, barW, barH);
+          }
+        });
+
+        // Title
+        ctx.fillStyle = '#666';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('ADMF (Accumulation/Distribution Money Flow)', pad.left + 4, 10);
+      }, [data]);
+
+      return <div ref={containerRef} className="chart-container"><canvas ref={canvasRef} /></div>;
+    };
+
+    // ===== VOLUME CHART =====
+    const VolumeChart = ({ data }) => {
+      const containerRef = React.useRef(null);
+      const canvasRef = React.useRef(null);
+
+      React.useEffect(() => {
+        if (!data?.length || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const rect = containerRef.current.getBoundingClientRect();
+        canvas.width = rect.width * 2;
+        canvas.height = 80 * 2;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = '80px';
+        ctx.scale(2, 2);
+
+        const width = rect.width, height = 80;
+        const pad = { top: 10, right: 55, bottom: 15, left: 10 };
+        const cw = width - pad.left - pad.right;
+        const ch = height - pad.top - pad.bottom;
+        const visible = data.slice(-90);
+        const maxVol = Math.max(...visible.map(d => d.v));
+        const barW = Math.max(2, cw / visible.length - 1);
+        const gap = (cw - barW * visible.length) / (visible.length + 1);
+
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, width, height);
+
+        visible.forEach((d, i) => {
+          const x = pad.left + gap + i * (barW + gap);
+          const barH = (d.v / maxVol) * ch;
+          ctx.fillStyle = d.c >= d.o ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
+          ctx.fillRect(x, pad.top + ch - barH, barW, barH);
+        });
+
+        // VA lines
+        const drawVA = (key, color) => {
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.2;
+          let started = false;
+          visible.forEach((d, i) => {
+            if (d[key] == null) return;
+            const x = pad.left + gap + i * (barW + gap) + barW / 2;
+            const y = pad.top + ch - (d[key] / maxVol) * ch;
+            started ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            started = true;
+          });
+          ctx.stroke();
+        };
+        drawVA('va5', '#f59e0b');
+        drawVA('va20', '#3b82f6');
+      }, [data]);
+
+      return <div ref={containerRef} className="chart-container"><canvas ref={canvasRef} /></div>;
+    };
+
+    // ===== MAIN APP =====
+    function App() {
+      const [snapshot, setSnapshot] = React.useState(null);
+      const [loading, setLoading] = React.useState(true);
+      const [error, setError] = React.useState(null);
+      const [selectedStock, setSelectedStock] = React.useState(null);
+      const [dailyData, setDailyData] = React.useState(null);
+      const [loadingDaily, setLoadingDaily] = React.useState(false);
+      
+      const [filterTab, setFilterTab] = React.useState('ma'); // 'ma' | 'admf'
+      const [thresholds, setThresholds] = React.useState({ maConverge: 10, vaConverge: 50, ma5_20: 5, ma20_60: 8 });
+      const [admfPeriod, setAdmfPeriod] = React.useState('2m'); // 1m, 2m, 3m, 4m
+      const [admfThreshold, setAdmfThreshold] = React.useState(50); // pct_near_zero threshold
+      const [exchange, setExchange] = React.useState('ALL');
+      const [sortBy, setSortBy] = React.useState('maConverge');
+      const [sortOrder, setSortOrder] = React.useState('asc');
+
+      React.useEffect(() => {
+        fetch(`${DATA_BASE_URL}/snapshot.json`)
+          .then(r => r.ok ? r.json() : Promise.reject('Không thể tải'))
+          .then(setSnapshot)
+          .catch(e => setError(String(e)))
+          .finally(() => setLoading(false));
+      }, []);
+
+      React.useEffect(() => {
+        if (!selectedStock) { setDailyData(null); return; }
+        setLoadingDaily(true);
+        fetch(`${DATA_BASE_URL}/daily/${selectedStock}.json`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => setDailyData(data.data.map(row => data.columns.reduce((obj, col, i) => ({ ...obj, [col]: row[i] }), {}))))
+          .catch(() => setDailyData(null))
+          .finally(() => setLoadingDaily(false));
+      }, [selectedStock]);
+
+      const getAdmfData = (stock) => stock[`admf_${admfPeriod}`];
+
+      const filteredStocks = React.useMemo(() => {
+        if (!snapshot?.stocks) return [];
+        return snapshot.stocks
+          .filter(s => {
+            if (exchange !== 'ALL' && s.exchange !== exchange) return false;
+            
+            if (filterTab === 'ma') {
+              return s.maConverge <= thresholds.maConverge && 
+                     s.vaConverge <= thresholds.vaConverge && 
+                     s.ma5_20 <= thresholds.ma5_20 && 
+                     s.ma20_60 <= thresholds.ma20_60;
+            } else {
+              const admf = getAdmfData(s);
+              if (!admf) return false;
+              return admf.pct_near_zero >= admfThreshold;
+            }
+          })
+          .sort((a, b) => {
+            let aVal, bVal;
+            if (sortBy === 'admf_near_zero') {
+              aVal = getAdmfData(a)?.pct_near_zero ?? 0;
+              bVal = getAdmfData(b)?.pct_near_zero ?? 0;
+            } else if (sortBy === 'admf_crosses') {
+              aVal = getAdmfData(a)?.zero_cross_count ?? 0;
+              bVal = getAdmfData(b)?.zero_cross_count ?? 0;
+            } else {
+              aVal = a[sortBy] ?? 0;
+              bVal = b[sortBy] ?? 0;
+            }
+            return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+          });
+      }, [snapshot, thresholds, admfPeriod, admfThreshold, exchange, sortBy, sortOrder, filterTab]);
+
+      const getBadge = (v, max, reverse = false) => {
+        const r = reverse ? (1 - v / max) : (v / max);
+        return `badge badge-${r <= 0.3 ? 'green' : r <= 0.6 ? 'yellow' : r <= 0.8 ? 'orange' : 'red'}`;
+      };
+
+      if (loading) return <div className="loading"><div className="spinner"></div><div style={{ color: '#4b5563' }}>Đang tải...</div></div>;
+      if (error) return <div className="loading"><div style={{ fontSize: 40, marginBottom: 12 }}>❌</div><div style={{ color: '#dc2626' }}>{error}</div></div>;
+
+      return (
+        <div>
+          <div className="header">
+            <div className="container">
+              <h1>📊 VN Stock Scanner - MA/VA/ADMF</h1>
+              <p>Lọc cổ phiếu hội tụ MA/VA và ADMF dao động quanh 0 • Cập nhật: {snapshot?.updated} • {snapshot?.totalStocks} mã</p>
+            </div>
+          </div>
+          
+          <div className="container" style={{ padding: '20px 16px' }}>
+            <div className="grid grid-4">
+              {/* Sidebar */}
+              <div>
+                {/* Filter Tabs */}
+                <div className="card">
+                  <div className="tabs">
+                    <div className={`tab ${filterTab === 'ma' ? 'active' : ''}`} onClick={() => { setFilterTab('ma'); setSortBy('maConverge'); }}>📈 MA/VA</div>
+                    <div className={`tab ${filterTab === 'admf' ? 'active' : ''}`} onClick={() => { setFilterTab('admf'); setSortBy('admf_near_zero'); setSortOrder('desc'); }}>💰 ADMF</div>
+                  </div>
+                  
+                  {/* Exchange Filter */}
+                  <div className="mb-2">
+                    <div className="label">Sàn giao dịch:</div>
+                    <div className="btn-group">
+                      {['ALL', 'HOSE', 'HNX', 'UPCOM'].map(ex => (
+                        <button key={ex} onClick={() => setExchange(ex)} className={`btn btn-pill ${exchange === ex ? 'btn-active' : 'btn-secondary'}`}>{ex}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {filterTab === 'ma' ? (
+                    <>
+                      <div className="section-title">📈 Ngưỡng MA/VA</div>
+                      {[
+                        { k: 'maConverge', l: 'MA Hội tụ', m: 20 },
+                        { k: 'vaConverge', l: 'VA Hội tụ', m: 100 },
+                        { k: 'ma5_20', l: 'MA5-MA20', m: 15 },
+                        { k: 'ma20_60', l: 'MA20-MA60', m: 20 },
+                      ].map(item => (
+                        <div key={item.k} className="slider-group">
+                          <div className="slider-header">
+                            <span className="slider-label">{item.l}</span>
+                            <span className="slider-value">≤ {thresholds[item.k]}%</span>
+                          </div>
+                          <input type="range" className="range" min="0" max={item.m} step="0.5" value={thresholds[item.k]} 
+                            onChange={e => setThresholds(p => ({ ...p, [item.k]: +e.target.value }))} />
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <div className="section-title">💰 Bộ lọc ADMF</div>
+                      <div className="info-box">
+                        <strong>ADMF dao động quanh 0</strong> = Dòng tiền cân bằng, đang tích lũy sideway, chuẩn bị breakout.
+                      </div>
+                      
+                      <div className="mb-2">
+                        <div className="label">Khoảng thời gian:</div>
+                        <div className="btn-group">
+                          {[
+                            { v: '1m', l: '1 tháng' },
+                            { v: '2m', l: '2 tháng' },
+                            { v: '3m', l: '3 tháng' },
+                            { v: '4m', l: '4 tháng' },
+                          ].map(p => (
+                            <button key={p.v} onClick={() => setAdmfPeriod(p.v)} className={`btn btn-pill ${admfPeriod === p.v ? 'btn-active' : 'btn-secondary'}`}>{p.l}</button>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div className="slider-group">
+                        <div className="slider-header">
+                          <span className="slider-label">% thời gian gần 0</span>
+                          <span className="slider-value">≥ {admfThreshold}%</span>
+                        </div>
+                        <input type="range" className="range" min="0" max="100" step="5" value={admfThreshold}
+                          onChange={e => setAdmfThreshold(+e.target.value)} />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="section-title">🔄 Sắp xếp</div>
+                  <select className="select mb-2" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                    {filterTab === 'ma' ? (
+                      <>
+                        <option value="maConverge">MA Hội tụ</option>
+                        <option value="vaConverge">VA Hội tụ</option>
+                        <option value="ma5_20">MA5-MA20</option>
+                        <option value="price">Giá</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="admf_near_zero">% Gần đường 0</option>
+                        <option value="admf_crosses">Số lần cắt 0</option>
+                        <option value="price">Giá</option>
+                      </>
+                    )}
+                  </select>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSortOrder('asc')} className={`btn flex-1 ${sortOrder === 'asc' ? 'btn-active' : 'btn-secondary'}`}>↑ Tăng</button>
+                    <button onClick={() => setSortOrder('desc')} className={`btn flex-1 ${sortOrder === 'desc' ? 'btn-active' : 'btn-secondary'}`}>↓ Giảm</button>
+                  </div>
+
+                  <div className="section-title">📊 Kết quả</div>
+                  <div className="stats-box">
+                    <div className="stats-number">{filteredStocks.length}</div>
+                    <div className="stats-label">/ {snapshot?.totalStocks} mã thỏa điều kiện</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content */}
+              <div>
+                {/* Charts */}
+                {selectedStock && (
+                  <div className="card">
+                    <div className="chart-header">
+                      <div className="chart-title">
+                        📈 {selectedStock}
+                        {loadingDaily && <span style={{ marginLeft: 8, fontSize: 13, color: '#9ca3af' }}>Đang tải...</span>}
+                      </div>
+                      <button className="chart-close" onClick={() => setSelectedStock(null)}>×</button>
+                    </div>
+                    <CandlestickChart data={dailyData} />
+                    {dailyData && (
+                      <>
+                        <div className="mt-3"><ADMFChart data={dailyData} /></div>
+                        <div className="mt-3"><VolumeChart data={dailyData} /></div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Table */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div className="table-container">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Mã</th>
+                          <th>Sàn</th>
+                          <th className="right">Giá</th>
+                          <th className="right">KL</th>
+                          {filterTab === 'ma' ? (
+                            <>
+                              <th className="center blue">MA5-20</th>
+                              <th className="center blue">MA20-60</th>
+                              <th className="center green">MA Conv</th>
+                              <th className="center purple">VA Conv</th>
+                            </>
+                          ) : (
+                            <>
+                              <th className="center orange">ADMF</th>
+                              <th className="center green">% Gần 0</th>
+                              <th className="center blue">Cắt 0</th>
+                              <th className="center purple">Avg Dist</th>
+                            </>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredStocks.length === 0 ? (
+                          <tr><td colSpan="9"><div className="empty"><div className="empty-icon">🔍</div><div>Không tìm thấy mã nào</div></div></td></tr>
+                        ) : filteredStocks.slice(0, 100).map((s, i) => {
+                          const admf = getAdmfData(s);
+                          return (
+                            <tr key={s.symbol} onClick={() => setSelectedStock(s.symbol)} className={selectedStock === s.symbol ? 'selected' : ''}>
+                              <td className="muted">{i + 1}</td>
+                              <td className="symbol">{s.symbol}</td>
+                              <td className="muted">{s.exchange}</td>
+                              <td className="right mono">{formatPrice(s.price)}</td>
+                              <td className="right muted">{formatNumber(s.volume)}</td>
+                              {filterTab === 'ma' ? (
+                                <>
+                                  <td className="center"><span className={getBadge(s.ma5_20, thresholds.ma5_20)}>{s.ma5_20?.toFixed(1)}%</span></td>
+                                  <td className="center"><span className={getBadge(s.ma20_60, thresholds.ma20_60)}>{s.ma20_60?.toFixed(1)}%</span></td>
+                                  <td className="center"><span className={getBadge(s.maConverge, thresholds.maConverge)}>{s.maConverge?.toFixed(1)}%</span></td>
+                                  <td className="center"><span className={getBadge(s.vaConverge, thresholds.vaConverge)}>{s.vaConverge?.toFixed(1)}%</span></td>
+                                </>
+                              ) : (
+                                <>
+                                  <td className="center"><span className={`badge ${s.admf >= 0 ? 'badge-green' : 'badge-red'}`}>{formatNumber(s.admf, 0)}</span></td>
+                                  <td className="center"><span className={getBadge(100 - (admf?.pct_near_zero || 0), 100)}>{admf?.pct_near_zero?.toFixed(0) || '-'}%</span></td>
+                                  <td className="center"><span className="badge badge-blue">{admf?.zero_cross_count || '-'}</span></td>
+                                  <td className="center"><span className={getBadge(admf?.avg_distance || 0, 50)}>{admf?.avg_distance?.toFixed(0) || '-'}%</span></td>
+                                </>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {filteredStocks.length > 100 && (
+                    <div style={{ padding: 10, background: '#f9fafb', textAlign: 'center', fontSize: 12, color: '#6b7280' }}>
+                      Hiển thị 100/{filteredStocks.length} mã
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

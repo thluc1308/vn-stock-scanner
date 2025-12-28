@@ -1,0 +1,70 @@
+name: Update Stock Data
+
+on:
+  schedule:
+    # Chạy lúc 6:30 AM (GMT+7) = 23:30 UTC hôm trước
+    - cron: '30 23 * * 0-4'  # Chủ nhật - Thứ 5 (cho phiên T2-T6)
+  workflow_dispatch:  # Cho phép chạy thủ công
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install vnstock pandas
+      
+      - name: Run data fetcher
+        run: |
+          cd scripts
+          python fetch_data.py
+      
+      - name: Move data to docs folder
+        run: |
+          mkdir -p docs/data/daily
+          cp -r data/snapshot.json docs/data/
+          cp -r data/daily/*.json docs/data/daily/
+      
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/data/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Update stock data $(date +'%Y-%m-%d')" && git push)
+
+  # Deploy to GitHub Pages
+  deploy:
+    needs: update-data
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main  # Lấy code mới nhất sau khi update data
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './docs'
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,15 +1,16 @@
 """
 VN Stock MA/VA Scanner - Data Fetcher
-Tương thích với vnstock 3.x
+CHỈ HOSE + Xử lý song song để nhanh hơn
 
-Yêu cầu: pip install vnstock pandas numpy
+Yêu cầu: pip install vnstock3 pandas numpy
 """
 
 import json
-import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import pandas as pd
 import numpy as np
@@ -28,11 +29,14 @@ except ImportError:
 OUTPUT_DIR = Path("data")
 DAILY_DIR = OUTPUT_DIR / "daily"
 YEARS_HISTORY = 2
-SLEEP_BETWEEN_REQUESTS = 0.5
 ADMF_LENGTH = 14
+MAX_WORKERS = 5  # Số luồng song song
+EXCHANGES = ['HOSE']  # Chỉ HOSE trước, thêm 'HNX', 'UPCOM' sau nếu cần
 
+# Thread-safe counter
+lock = threading.Lock()
+progress = {'success': 0, 'failed': 0, 'total': 0}
 
-# ============== HELPER FUNCTIONS ==============
 
 def rma(series, length):
     """RMA (Relative Moving Average) - Wilder's Smoothing"""
@@ -41,49 +45,73 @@ def rma(series, length):
 
 
 def get_all_symbols():
-    """Lấy danh sách tất cả mã chứng khoán"""
+    """Lấy danh sách mã chứng khoán theo sàn"""
+    all_stocks = []
+    
     try:
         stock = Vnstock().stock(symbol='VNM', source='VCI')
         
-        all_stocks = []
-        
-        # Thử lấy theo từng sàn
-        for exchange in ['HOSE', 'HNX', 'UPCOM']:
+        for exchange in EXCHANGES:
             try:
-                # Thử cách 1: symbols_by_group
-                symbols = stock.listing.symbols_by_group(exchange)
-                if isinstance(symbols, pd.DataFrame):
-                    for _, row in symbols.iterrows():
-                        sym = row.get('symbol') or row.get('ticker') or row.iloc[0]
-                        all_stocks.append({'symbol': str(sym), 'exchange': exchange})
-                elif isinstance(symbols, list):
-                    for sym in symbols:
-                        all_stocks.append({'symbol': str(sym), 'exchange': exchange})
+                # Thử nhiều cách lấy symbols
+                symbols = None
+                
+                # Cách 1: symbols_by_group
+                try:
+                    symbols = stock.listing.symbols_by_group(exchange)
+                except:
+                    pass
+                
+                # Cách 2: all_symbols rồi filter
+                if symbols is None or len(symbols) == 0:
+                    try:
+                        all_syms = stock.listing.all_symbols()
+                        if isinstance(all_syms, pd.DataFrame):
+                            # Filter theo exchange
+                            if 'exchange' in all_syms.columns:
+                                symbols = all_syms[all_syms['exchange'] == exchange]
+                            elif 'comGroupCode' in all_syms.columns:
+                                symbols = all_syms[all_syms['comGroupCode'] == exchange]
+                            else:
+                                symbols = all_syms
+                    except:
+                        pass
+                
+                if symbols is not None:
+                    if isinstance(symbols, pd.DataFrame):
+                        for _, row in symbols.iterrows():
+                            sym = None
+                            for col in ['symbol', 'ticker', 'code']:
+                                if col in row.index and pd.notna(row[col]):
+                                    sym = str(row[col]).upper()
+                                    break
+                            if sym is None and len(row) > 0:
+                                sym = str(row.iloc[0]).upper()
+                            if sym and len(sym) <= 5 and sym.isalpha():
+                                all_stocks.append({'symbol': sym, 'exchange': exchange})
+                    elif isinstance(symbols, list):
+                        for sym in symbols:
+                            sym = str(sym).upper()
+                            if len(sym) <= 5 and sym.isalpha():
+                                all_stocks.append({'symbol': sym, 'exchange': exchange})
+                
                 print(f"  ✓ {exchange}: {len([s for s in all_stocks if s['exchange']==exchange])} mã")
+                
             except Exception as e:
                 print(f"  ⚠ {exchange}: {e}")
         
-        # Nếu không lấy được theo sàn, thử lấy tất cả
-        if len(all_stocks) == 0:
-            try:
-                all_symbols = stock.listing.all_symbols()
-                if isinstance(all_symbols, pd.DataFrame):
-                    for _, row in all_symbols.iterrows():
-                        sym = row.get('symbol') or row.get('ticker') or row.iloc[0]
-                        exch = row.get('exchange') or row.get('comGroupCode') or 'HOSE'
-                        all_stocks.append({'symbol': str(sym), 'exchange': str(exch)})
-                elif isinstance(all_symbols, list):
-                    for sym in all_symbols:
-                        all_stocks.append({'symbol': str(sym), 'exchange': 'UNKNOWN'})
-                print(f"  ✓ Tổng: {len(all_stocks)} mã")
-            except Exception as e:
-                print(f"  ⚠ all_symbols: {e}")
-        
-        return all_stocks
-        
     except Exception as e:
-        print(f"Lỗi lấy danh sách mã: {e}")
-        return []
+        print(f"Lỗi: {e}")
+    
+    # Loại bỏ trùng
+    seen = set()
+    unique = []
+    for s in all_stocks:
+        if s['symbol'] not in seen:
+            seen.add(s['symbol'])
+            unique.append(s)
+    
+    return unique
 
 
 def fetch_stock_data(symbol, start_date, end_date):
@@ -96,26 +124,19 @@ def fetch_stock_data(symbol, start_date, end_date):
             return None
         
         # Chuẩn hóa tên cột
-        df = df.rename(columns={
-            'time': 'date',
-            'open': 'o',
-            'high': 'h', 
-            'low': 'l',
-            'close': 'c',
-            'volume': 'v'
-        })
+        col_map = {
+            'time': 'date', 'open': 'o', 'high': 'h', 
+            'low': 'l', 'close': 'c', 'volume': 'v'
+        }
+        df = df.rename(columns=col_map)
         
-        # Đảm bảo có các cột cần thiết
-        required = ['date', 'o', 'h', 'l', 'c', 'v']
-        for col in required:
-            if col not in df.columns:
-                # Thử tìm cột tương tự
-                for orig_col in df.columns:
-                    if col in orig_col.lower():
-                        df[col] = df[orig_col]
-                        break
+        # Đảm bảo có cột date
+        if 'date' not in df.columns:
+            for col in df.columns:
+                if 'time' in col.lower() or 'date' in col.lower():
+                    df['date'] = df[col]
+                    break
         
-        # Chuyển date thành string
         if 'date' in df.columns:
             df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
         
@@ -130,17 +151,17 @@ def fetch_stock_data(symbol, start_date, end_date):
         df['va60'] = df['v'].rolling(60).mean()
         
         # Tính ADMF
-        df['tr'] = pd.concat([
+        tr = pd.concat([
             df['h'] - df['l'],
             abs(df['h'] - df['c'].shift(1)),
             abs(df['l'] - df['c'].shift(1))
         ], axis=1).max(axis=1)
         
-        df['ad_ratio'] = df['c'].diff() / df['tr'].replace(0, np.nan)
-        df['ad_ratio'] = df['ad_ratio'].fillna(0)
+        ad_ratio = df['c'].diff() / tr.replace(0, np.nan)
+        ad_ratio = ad_ratio.fillna(0)
         
         hlc3 = (df['h'] + df['l'] + df['c']) / 3
-        df['admf'] = rma(df['v'] * hlc3 * df['ad_ratio'], ADMF_LENGTH)
+        df['admf'] = rma(df['v'] * hlc3 * ad_ratio, ADMF_LENGTH)
         
         return df
         
@@ -181,15 +202,11 @@ def calculate_admf_stats(admf_series, period_days):
         return None
     
     normalized = recent / max_abs
-    
     signs = np.sign(recent)
     zero_crosses = int((signs.diff().abs() > 0).sum())
-    
     avg_distance = round(normalized.abs().mean() * 100, 2)
     max_distance = round(normalized.abs().max() * 100, 2)
-    
-    threshold = 0.2
-    pct_near_zero = round((normalized.abs() < threshold).sum() / len(normalized) * 100, 1)
+    pct_near_zero = round((normalized.abs() < 0.2).sum() / len(normalized) * 100, 1)
     
     return {
         'zero_cross_count': zero_crosses,
@@ -228,12 +245,6 @@ def process_stock(symbol_info, start_date, end_date):
     
     va_converge = (va_diff(va5, va20) + va_diff(va20, va60)) / 2
     
-    # ADMF stats
-    admf_1m = calculate_admf_stats(df['admf'], 22)
-    admf_2m = calculate_admf_stats(df['admf'], 44)
-    admf_3m = calculate_admf_stats(df['admf'], 66)
-    admf_4m = calculate_admf_stats(df['admf'], 88)
-    
     snapshot = {
         "symbol": symbol,
         "exchange": exchange,
@@ -245,10 +256,10 @@ def process_stock(symbol_info, start_date, end_date):
         **convergence,
         "vaConverge": round(va_converge, 2),
         "admf": round(float(latest.get('admf', 0) or 0), 0),
-        "admf_1m": admf_1m,
-        "admf_2m": admf_2m,
-        "admf_3m": admf_3m,
-        "admf_4m": admf_4m,
+        "admf_1m": calculate_admf_stats(df['admf'], 22),
+        "admf_2m": calculate_admf_stats(df['admf'], 44),
+        "admf_3m": calculate_admf_stats(df['admf'], 66),
+        "admf_4m": calculate_admf_stats(df['admf'], 88),
     }
     
     # Daily data
@@ -280,9 +291,33 @@ def process_stock(symbol_info, start_date, end_date):
     return {"snapshot": snapshot, "daily": daily}
 
 
+def process_single_stock(args):
+    """Wrapper để xử lý song song"""
+    stock, start_date, end_date, idx, total = args
+    symbol = stock['symbol']
+    
+    try:
+        result = process_stock(stock, start_date, end_date)
+        
+        with lock:
+            if result:
+                progress['success'] += 1
+                print(f"   ✓ [{progress['success']+progress['failed']}/{total}] {symbol}")
+            else:
+                progress['failed'] += 1
+        
+        return result
+        
+    except Exception as e:
+        with lock:
+            progress['failed'] += 1
+        return None
+
+
 def main():
     print("=" * 60)
     print("VN STOCK MA/VA SCANNER - DATA FETCHER")
+    print(f"Sàn: {', '.join(EXCHANGES)} | Song song: {MAX_WORKERS} luồng")
     print("=" * 60)
     
     # Tạo thư mục
@@ -302,49 +337,35 @@ def main():
         print("❌ Không lấy được danh sách mã. Thoát.")
         exit(1)
     
-    print(f"\n   Tổng cộng: {len(all_stocks)} mã")
+    total = len(all_stocks)
+    print(f"\n   Tổng cộng: {total} mã")
     
-    # Xử lý từng mã
-    print("\n🔄 Đang fetch dữ liệu...")
+    # Xử lý song song
+    print(f"\n🔄 Đang fetch dữ liệu ({MAX_WORKERS} luồng song song)...")
+    
     snapshots = []
-    success = 0
-    failed = 0
+    args_list = [(stock, start_date, end_date, i, total) for i, stock in enumerate(all_stocks)]
     
-    for i, stock in enumerate(all_stocks):
-        symbol = stock['symbol']
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_single_stock, args): args[0]['symbol'] for args in args_list}
         
-        try:
-            result = process_stock(stock, start_date, end_date)
-            
+        for future in as_completed(futures):
+            result = future.result()
             if result:
                 snapshots.append(result['snapshot'])
                 
                 # Lưu daily data
+                symbol = result['snapshot']['symbol']
                 daily_file = DAILY_DIR / f"{symbol}.json"
                 with open(daily_file, 'w', encoding='utf-8') as f:
                     json.dump(result['daily'], f)
-                
-                success += 1
-                print(f"   ✓ [{i+1}/{len(all_stocks)}] {symbol}")
-            else:
-                failed += 1
-                
-        except Exception as e:
-            failed += 1
-            print(f"   ✗ [{i+1}/{len(all_stocks)}] {symbol}: {e}")
-        
-        time.sleep(SLEEP_BETWEEN_REQUESTS)
-        
-        # Progress update
-        if (i + 1) % 50 == 0:
-            print(f"\n   === Tiến độ: {i+1}/{len(all_stocks)} ({success} thành công, {failed} lỗi) ===\n")
     
     # Lưu snapshot
     snapshot_data = {
         "updated": end_date,
         "generated": datetime.now().isoformat(),
         "totalStocks": len(snapshots),
-        "stocks": snapshots
+        "stocks": sorted(snapshots, key=lambda x: x['symbol'])
     }
     
     with open(OUTPUT_DIR / "snapshot.json", 'w', encoding='utf-8') as f:
@@ -352,8 +373,8 @@ def main():
     
     print("\n" + "=" * 60)
     print(f"✅ HOÀN TẤT!")
-    print(f"   - Thành công: {success} mã")
-    print(f"   - Thất bại: {failed} mã")
+    print(f"   - Thành công: {progress['success']} mã")
+    print(f"   - Thất bại: {progress['failed']} mã")
     print(f"   - File: {OUTPUT_DIR}/snapshot.json")
     print("=" * 60)
 
